@@ -70,3 +70,58 @@ A single tick runs and exits. Repeat to simulate the cron.
 ## License
 
 MIT
+
+## Live-mode runbook (Batch 3)
+
+When you're ready to flip from log to live mode:
+
+### 1. Fund the platform mint key wallet
+
+Send a small amount of ION (~3–5 ION suffices for ~50 mints' worth of gas) from your main wallet to the mint key wallet address. This both deploys the V4 wallet contract on-chain *and* leaves headroom for the watcher to pay gas on mint authorizations. Each mint costs ~0.1–0.15 ION in gas. Top up later when balance dips.
+
+### 2. Add the seed phrase as a GitHub Actions secret
+
+Go to **Settings → Secrets and variables → Actions → Secrets → New repository secret**.
+
+- Name: `MINT_KEY_MNEMONIC`
+- Value: the 24-word seed phrase for the mint key wallet, separated by single spaces
+
+GitHub masks the value in logs. Paste using the careful protocol — click into the input field, paste, wait 2 seconds (in case of long-paste truncation issues), then save.
+
+### 3. Flip the mode variable
+
+In **Variables**, edit `WATCHER_MODE` (or create it if missing):
+
+- Value: `live`
+
+### 4. Trigger a manual run
+
+**Actions → ION NFT Watcher → Run workflow** → leave mode as the default (`log`) or override to `live` via the dropdown. The repository variable governs scheduled runs going forward.
+
+Watch the logs for:
+
+- `[live] mint key wallet derived: UQ...`
+- `[live] mint key wallet balance: N nano` (should match what you funded)
+- `[live] verifying source tx for burn ...`
+- `[live] prepared mint: collection=..., index=N, recipient=...`
+- `[live] ✓ mint broadcast tx=... seqno=N`
+
+If any of those fail, the watcher safely refuses the mint and logs why. No funds move until all checks pass.
+
+### 5. Watch the NFT land
+
+Within ~30 seconds of the mint broadcast, the NFT contract gets deployed at a deterministic address (computed from the collection + item index). The burner's wallet will list it under their NFT collection within 1–2 minutes (depends on the wallet's indexer).
+
+### 6. Operational safety
+
+- **MAX_MINTS_PER_RUN** (default 5): hard cap on actual mint signings per tick
+- **Address consistency check**: preflight verifies the derived wallet address matches `PLATFORM_MINT_KEY_ADDRESS` var
+- **Balance check**: refuses to mint if balance < 0.5 ION
+- **Split verification**: refuses to mint if the source tx doesn't include valid creator + treasury legs
+- **Idempotency**: each burn is keyed by tx_hash; reruns don't double-mint
+
+### 7. Recovery
+
+- Watcher down: nothing happens, ION stays at burn pocket, mint is queued for next successful run
+- Mint key compromised: revoke by generating a new mint key wallet, updating env var, transferring on-chain ownership of each collection (separate procedure)
+- Bug surfaces: set `WATCHER_MODE=log` immediately to halt mint signings while preserving detection

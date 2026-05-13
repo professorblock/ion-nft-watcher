@@ -17,7 +17,8 @@
  * before we add anything that touches keys.
  */
 
-import { Address } from "ton";
+import BN from "bn.js";
+import { Address, toNano } from "ton";
 import {
   MAX_BURNS_PER_RUN,
   MAX_TXS_PER_POCKET_PER_RUN,
@@ -26,7 +27,7 @@ import {
   getMintKeyAddress,
   getTreasuryAddress,
 } from "./ion-config";
-import { fetchIncomingSince, IncomingTransfer } from "./ion-rpc";
+import { fetchIncomingSince, IncomingTransfer, getClient } from "./ion-rpc";
 import {
   isAlreadyProcessed,
   ProcessedBurn,
@@ -38,6 +39,14 @@ import {
   writeProcessedBurns,
 } from "./state-store";
 import { deriveBurnPocket } from "./burn-pocket";
+import { getMintKeyWallet, getMintKeyBalance, sendMint } from "./wallet";
+import { buildMintBody } from "./mint-builder";
+import { verifyBurnSplits, computeExpectedSplits } from "./source-tx-verify";
+
+/** Hard cap on mints actually signed per run. Conservative for early days. */
+const MAX_MINTS_PER_RUN = Number(process.env.MAX_MINTS_PER_RUN ?? "5");
+/** Minimum mint key wallet balance to attempt minting (gas headroom). */
+const MIN_MINT_KEY_BALANCE_NANO = toNano("0.5");
 
 interface RunSummary {
   mode: string;
@@ -96,6 +105,37 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Live-mode preflight: ensure mint key wallet is derivable + funded.
+  // Done once before processing any burn so we fail fast.
+  let mintedThisRun = 0;
+  if (WATCHER_MODE === "live") {
+    try {
+      const { address } = await getMintKeyWallet();
+      const derivedAddr = address.toFriendly({ urlSafe: true, bounceable: false, testOnly: false });
+      console.log(`[live] mint key wallet derived: ${derivedAddr.slice(0, 12)}…`);
+      const configuredAddr = mintKey?.toFriendly({ urlSafe: true, bounceable: false, testOnly: false });
+      if (configuredAddr && configuredAddr !== derivedAddr) {
+        throw new Error(
+          `Derived mint key address (${derivedAddr}) does not match configured ` +
+            `PLATFORM_MINT_KEY_ADDRESS (${configuredAddr}). Refusing to act.`,
+        );
+      }
+      const balance = await getMintKeyBalance();
+      console.log(`[live] mint key wallet balance: ${balance.toString()} nano`);
+      if (balance.lt(MIN_MINT_KEY_BALANCE_NANO)) {
+        throw new Error(
+          `Mint key wallet under-funded: ${balance.toString()} nano, need ≥ ${MIN_MINT_KEY_BALANCE_NANO.toString()}`,
+        );
+      }
+    } catch (e: any) {
+      const msg = `Live-mode preflight failed: ${e?.message ?? e}`;
+      console.error(`[error] ${msg}`);
+      summary.errors.push(msg);
+      finalize(summary, startedAt);
+      return;
+    }
+  }
+
   let totalNew = 0;
   for (const coll of tracked) {
     if (totalNew >= MAX_BURNS_PER_RUN) {
@@ -113,17 +153,30 @@ async function main(): Promise<void> {
       for (const transfer of (cursorBuf[coll.burn_pocket_address] ?? [])) {
         if (isAlreadyProcessed(processed, transfer.tx_hash)) continue;
 
+        // Hard cap on actual mint signings per run, separate from burn-poll cap.
+        if (WATCHER_MODE === "live" && mintedThisRun >= MAX_MINTS_PER_RUN) {
+          console.log(
+            `[info] Hit MAX_MINTS_PER_RUN (${MAX_MINTS_PER_RUN}); leaving remaining burns for next tick.`,
+          );
+          break;
+        }
+
         const result = await handleBurn(transfer, coll, treasury);
         processed[transfer.tx_hash] = result;
 
         if (result.status === "rejected") summary.rejected++;
         if (result.status === "validated") summary.would_mint++;
+        if (result.status === "minted") mintedThisRun++;
       }
     } catch (e: any) {
       const msg = `Error polling ${coll.collection_address}: ${e?.message ?? e}`;
       console.error(`[error] ${msg}`);
       summary.errors.push(msg);
     }
+  }
+
+  if (WATCHER_MODE === "live") {
+    summary.would_mint = mintedThisRun; // re-purpose this counter for "actually minted"
   }
 
   writeProcessedBurns(processed);
@@ -242,18 +295,111 @@ async function handleBurn(
     return { ...base, status: "validated" };
   }
 
-  // LIVE MODE — not implemented in Batch 1.
-  // Batch 3 adds:
-  //   1. Fetch sender's source transaction
-  //   2. Verify all 3 legs (burn / creator / treasury) match expected splits
-  //   3. Reject if invalid; otherwise sign + send the mint message
-  console.error(
-    `[live-mode] reached but not implemented. Burn ${transfer.tx_hash.slice(0, 10)}… queued for next run.`,
+  // ─────────────────────────── LIVE MODE ───────────────────────────
+  // Step 1: verify all 3 legs of the source tx
+  if (!treasury) {
+    return {
+      ...base,
+      status: "rejected",
+      rejection_reason: "Treasury address unavailable in live mode",
+    };
+  }
+
+  const totalMintNano = new BN(coll.pob_mint_amount_nano);
+  const { burnNano, creatorNano, treasuryNano } = computeExpectedSplits(
+    totalMintNano,
+    coll.pob_burn_pct,
   );
+
+  console.log(
+    `[live] verifying source tx for burn ${transfer.tx_hash.slice(0, 10)}… ` +
+      `expected splits: burn=${burnNano.toString()}, creator=${creatorNano.toString()}, treasury=${treasuryNano.toString()}`,
+  );
+
+  const verification = await verifyBurnSplits(transfer.source, transfer.lt, {
+    burnPocket: Address.parse(coll.burn_pocket_address),
+    burnNano,
+    creator: Address.parse(coll.creator_address),
+    creatorNano,
+    treasury,
+    treasuryNano,
+  });
+
+  if (!verification.ok) {
+    console.warn(`[live] reject (split mismatch): ${verification.reason}`);
+    return {
+      ...base,
+      status: "rejected",
+      rejection_reason: verification.reason,
+    };
+  }
+
+  // Step 2: check mint key wallet has enough balance for gas
+  const balance = await getMintKeyBalance();
+  if (balance.lt(MIN_MINT_KEY_BALANCE_NANO)) {
+    return {
+      ...base,
+      status: "rejected",
+      rejection_reason: `Mint key wallet balance too low: ${balance.toString()} nano (need ≥ ${MIN_MINT_KEY_BALANCE_NANO.toString()})`,
+    };
+  }
+
+  // Step 3: read the collection's current next_item_index from chain
+  const client = getClient();
+  let itemIndex: number;
+  try {
+    const stack = await client.callGetMethod(
+      Address.parse(coll.collection_address),
+      "get_collection_data",
+    );
+    // stack[0] = next_item_index
+    itemIndex = (stack.stack[0] as any).readNumber
+      ? (stack.stack[0] as any).readNumber()
+      : Number((stack.stack[0] as any)[1] ?? 0);
+  } catch (e: any) {
+    return {
+      ...base,
+      status: "rejected",
+      rejection_reason: `Could not read collection next_item_index: ${e?.message ?? e}`,
+    };
+  }
+
+  // Step 4: build the mint body
+  const collectionAddr = Address.parse(coll.collection_address);
+  const { body, forwardAmount } = buildMintBody({
+    itemIndex,
+    newOwner: transfer.source,
+    itemContentSuffix: `${itemIndex}`,
+  });
+
+  console.log(
+    `[live] prepared mint: collection=${coll.collection_address.slice(0, 12)}…, ` +
+      `index=${itemIndex}, recipient=${transfer.source.toFriendly({ urlSafe: true, bounceable: false, testOnly: false }).slice(0, 12)}…, ` +
+      `forward=${forwardAmount.toString()} nano`,
+  );
+
+  // Step 5: send
+  let result: { transferHash: string; seqno: number };
+  try {
+    result = await sendMint({
+      collectionAddress: collectionAddr,
+      mintBody: body,
+      forwardAmount: forwardAmount.add(toNano("0.05")), // extra for collection contract gas
+    });
+  } catch (e: any) {
+    console.error(`[live] sendMint failed: ${e?.message ?? e}`);
+    return {
+      ...base,
+      status: "rejected",
+      rejection_reason: `sendMint failed: ${e?.message ?? e}`,
+    };
+  }
+
+  console.log(`[live] ✓ mint broadcast tx=${result.transferHash.slice(0, 16)}… seqno=${result.seqno}`);
   return {
     ...base,
-    status: "rejected",
-    rejection_reason: "Live mode not implemented in Batch 1",
+    status: "minted",
+    mint_tx_hash: result.transferHash,
   };
 }
 
