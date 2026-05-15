@@ -366,10 +366,17 @@ async function handleBurn(
 
   // Step 4: build the mint body
   const collectionAddr = Address.parse(coll.collection_address);
+  const collectionFriendly = collectionAddr.toFriendly({
+    urlSafe: true,
+    bounceable: true,
+    testOnly: false,
+  });
   const { body, forwardAmount } = buildMintBody({
     itemIndex,
     newOwner: transfer.source,
-    itemContentSuffix: `${itemIndex}`, // resolves to <common_content>/<index> on worker
+    // Suffix is appended to common_content (the worker's items base URL).
+    // Result: https://worker/items/<collection_friendly>/<index>
+    itemContentSuffix: `${collectionFriendly}/${itemIndex}`,
   });
 
   console.log(
