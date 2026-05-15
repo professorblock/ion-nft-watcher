@@ -369,7 +369,7 @@ async function handleBurn(
   const { body, forwardAmount } = buildMintBody({
     itemIndex,
     newOwner: transfer.source,
-    itemContentSuffix: `${itemIndex}`,
+    itemContentSuffix: `${itemIndex}`, // resolves to <common_content>/<index> on worker
   });
 
   console.log(
