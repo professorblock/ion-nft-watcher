@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "collection_address": "0:771307316dc7c1e40818e3eb669b99a8b47cb87a36072beecad4872805506825",
+    "burn_pocket_address": "0:ff3160f5c242354175bd7fc5fdd505e651a74db12d1de04c8e95d0fdff7e9a8d",
+    "creator_address": "0:0c4a0702bb5b085d11d5b36ff9784b915bd8d4974e6e59873b0464f24cbec577",
+    "pob_burn_pct": 80,
+    "pob_mint_amount_nano": "1000000000000",
+    "max_supply": null,
+    "registered_at": "2026-05-17T13:59:43.572Z"
+  }
+]
