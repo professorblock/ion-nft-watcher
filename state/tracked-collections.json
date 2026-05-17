@@ -25,5 +25,14 @@
     "pob_mint_amount_nano": "1000000000000",
     "max_supply": null,
     "registered_at": "2026-05-17T14:00:19.777Z"
+  },
+  {
+    "collection_address": "0:4136f7cf17067d12a76f980399f0161d66a557befa5283e92c98f15949c8accd",
+    "burn_pocket_address": "0:f8097543e1ea06a765322b5ff66734713d27be47cb89ddfff14d0445ec8a8108",
+    "creator_address": "0:0c4a0702bb5b085d11d5b36ff9784b915bd8d4974e6e59873b0464f24cbec577",
+    "pob_burn_pct": 80,
+    "pob_mint_amount_nano": "1000000000000",
+    "max_supply": null,
+    "registered_at": "2026-05-17T14:00:27.408Z"
   }
 ]
