@@ -38,5 +38,14 @@
     "amount_nano": "800000000000",
     "detected_at": "2026-05-17T14:02:45.578Z",
     "status": "validated"
+  },
+  "bzy4HSZCecIS2oYkQZZZ9ZZg8zbNhJkwlCpY4kZ+aQM=": {
+    "burn_tx_hash": "bzy4HSZCecIS2oYkQZZZ9ZZg8zbNhJkwlCpY4kZ+aQM=",
+    "burn_pocket_address": "0:5e7c8fbfc34ab40083e651df991651048dae92545fa81411e1fdee7bbc3b2572",
+    "burner_address": "UQAMSgcCu1sIXRHVs2_5eEuRW9jUl05uWYc7BGTyTL7Fd0Js",
+    "amount_nano": "800000000000",
+    "detected_at": "2026-05-17T14:12:10.850Z",
+    "status": "minted",
+    "mint_tx_hash": "14f2f84799d7247fbc47ae2ff6593ca79459cb6f52d61d728f7bedf6b5f3ad45"
   }
 }
