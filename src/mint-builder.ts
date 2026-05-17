@@ -30,9 +30,20 @@ export function buildMintBody(args: {
 }): { body: Cell; forwardAmount: BN } {
   const forwardAmount = args.forwardAmount ?? toNano("0.05");
 
-  // TIP-64 off-chain content cell: 0x01 byte + URL suffix bytes
+  // For PoB v1, every minted NFT in a collection shares the same metadata
+  // (same image, same name as the collection cover). To achieve this, the
+  // watcher passes an EMPTY suffix so the contract resolves NFT content to
+  // just the collection's common_content URI — the metadata JSON the wizard
+  // pinned during deploy. If we want per-item metadata in v2, we'd: (1) host
+  // a server route that returns item-specific JSON, and (2) pass a suffix
+  // like `${itemIndex}.json`.
+
+  // TIP-64 individual_content cell: per the standard NFT collection FunC
+  // contract, get_nft_content() prepends 0x01 + common_content + individual_content.
+  // So individual_content must be JUST the suffix bytes — NO 0x01 prefix here,
+  // or we end up with `0x01<common_url>0x01<suffix>` (a malformed URL with
+  // a control byte mid-path).
   const individualContent = beginCell()
-    .storeUint(0x01, 8)
     .storeBuffer(Buffer.from(args.itemContentSuffix, "utf-8"))
     .endCell();
 
