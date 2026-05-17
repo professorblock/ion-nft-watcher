@@ -34,5 +34,15 @@
     "pob_mint_amount_nano": "1000000000000",
     "max_supply": null,
     "registered_at": "2026-05-17T14:00:27.408Z"
+  },
+  {
+    "collection_address": "0:e3ae5a0ec09b54bed9561c978457a7032a53e94da08467409313468ee96f7f26",
+    "burn_pocket_address": "0:5e7c8fbfc34ab40083e651df991651048dae92545fa81411e1fdee7bbc3b2572",
+    "creator_address": "0:0c4a0702bb5b085d11d5b36ff9784b915bd8d4974e6e59873b0464f24cbec577",
+    "pob_burn_pct": 80,
+    "pob_mint_amount_nano": "1000000000000",
+    "max_supply": null,
+    "metadata_uri": "https://gateway.pinata.cloud/ipfs/QmUP1TVVsknNCW35Dddpdyjp51RJYLaxJKbjHGEXiutXR7",
+    "registered_at": "2026-05-17T14:06:12.065Z"
   }
 ]
